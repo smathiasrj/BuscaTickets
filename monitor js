@@ -1,0 +1,90 @@
+import { chromium } from 'playwright';
+
+// URL com os parâmetros exatos do dia 12/09/2026
+const TARGET_URL = 'https://buyticketbrasil.com/evento/rockinrio2026?data=1789261200000&evento_local=1765323797528x513509114247905300&cidade=Rio+de+Janeiro';
+
+async function sendTelegram(msg) {
+  const token = process.env.TELEGRAM_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  
+  if (!token || !chatId) {
+    console.error('Tokens do Telegram não configurados nos Secrets.');
+    return;
+  }
+
+  const url = `https://api.telegram.org/bot${token}/sendMessage`;
+  await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text: msg,
+      parse_mode: 'HTML'
+    })
+  });
+}
+
+async function checkTickets() {
+  const browser = await chromium.launch({ headless: true });
+  // Simula o contexto mobile igual ao do seu celular
+  const context = await browser.newContext({
+    viewport: { width: 412, height: 915 },
+    userAgent: 'Mozilla/5.0 (Linux; Android 13; SM-S908B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36'
+  });
+  
+  const page = await context.newPage();
+
+  try {
+    console.log('Acessando BuyTicket...');
+    await page.goto(TARGET_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+
+    // Aguarda o carregamento do framework reativo (Bubble/React)
+    await page.waitForTimeout(6000);
+
+    // Se o dropdown de categoria precisar de clique para exibir "Meia Estudante"
+    const dropdownCategoria = page.locator('text=Categoria').locator('..');
+    const categoriaVisivel = await page.getByText('Meia Estudante', { exact: false }).first().isVisible().catch(() => false);
+
+    if (!categoriaVisivel && await dropdownCategoria.isVisible().catch(() => false)) {
+      await dropdownCategoria.click();
+      await page.waitForTimeout(1000);
+      const opcaoMeia = page.getByText('Meia Estudante', { exact: false }).first();
+      if (await opcaoMeia.isVisible().catch(() => false)) {
+        await opcaoMeia.click();
+        await page.waitForTimeout(2000);
+      }
+    }
+
+    // Busca o botão de compra (que contém "Comprar" e o valor em R$)
+    const botaoComprar = page.locator('button, div', { hasText: /Comprar/i }).filter({ hasText: /R\$/ }).first();
+    const existeBotao = await botaoComprar.isVisible().catch(() => false);
+    
+    // Captura todo o texto da página para validações adicionais
+    const textoPagina = await page.innerText('body');
+    const temMeiaEstudante = textoPagina.includes('Meia Estudante');
+    const estaEsgotado = /esgotado|indispon[íi]vel|sem ingressos/i.test(textoPagina);
+
+    console.log(`Status: Meia Estudante na tela (${temMeiaEstudante}) | Botão com valor ativo (${existeBotao}) | Esgotado (${estaEsgotado})`);
+
+    // Se encontrou o botão de compra com valor e a opção Meia Estudante
+    if (temMeiaEstudante && existeBotao && !estaEsgotado) {
+      const precoTexto = await botaoComprar.innerText().catch(() => 'Valor disponível');
+      const mensagem = `🎟️ <b>Ingresso Encontrado - Rock in Rio (12/09)!</b>\n\n` +
+                       `<b>Categoria:</b> Meia Estudante\n` +
+                       `<b>Botão:</b> ${precoTexto.replace(/\n/g, ' ')}\n\n` +
+                       `<a href="${TARGET_URL}">Clique aqui para Comprar</a>`;
+      
+      await sendTelegram(mensagem);
+      console.log('Alerta enviado com sucesso para o Telegram!');
+    } else {
+      console.log('Ingresso Meia Estudante ainda indisponível.');
+    }
+
+  } catch (error) {
+    console.error('Erro na execução:', error);
+  } finally {
+    await browser.close();
+  }
+}
+
+checkTickets();
