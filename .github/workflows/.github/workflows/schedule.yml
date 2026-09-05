@@ -1,0 +1,31 @@
+name: Monitorar Ingressos BuyTicket
+
+on:
+  schedule:
+    # Roda a cada 30 minutos
+    - cron: '*/30 * * * *'
+  workflow_dispatch: # Permite disparar manualmente para testar
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Instalar dependências e Chromium
+        run: |
+          npm install
+          npx playwright install chromium --with-deps
+
+      - name: Executar raspador
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: node monitor.js
+        
